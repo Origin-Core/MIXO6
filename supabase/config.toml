@@ -1,0 +1,4 @@
+project_id = "tgltkobvufqazjrjckpe"
+
+[functions.mixo6-login]
+verify_jwt = false
