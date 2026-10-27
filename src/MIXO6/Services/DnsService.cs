@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Text;
@@ -66,33 +67,61 @@ public static class DnsService
             throw new ArgumentException("DNS اصلی و جایگزین باید هر دو IPv4 یا هر دو IPv6 باشند.");
         var family = parsed[0].AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? "IPv4" : "IPv6";
         var list = string.Join(",", parsed.Select(x => PsQuote(x.ToString())));
-        return $"$ErrorActionPreference='Stop'\ntrap {{ $_ | Out-String | Set-Content -LiteralPath {PsQuote(LogPathToken)} -Encoding UTF8; exit 1 }}\n$expected = @({list})\nSet-DnsClientServerAddress -InterfaceAlias {PsQuote(interfaceName)} -ServerAddresses $expected\n$actual = @(Get-DnsClientServerAddress -InterfaceAlias {PsQuote(interfaceName)} -AddressFamily {family} | Select-Object -ExpandProperty ServerAddresses)\nif (@(Compare-Object -ReferenceObject $expected -DifferenceObject $actual).Count -gt 0) {{ throw 'Windows DNS verification failed.' }}\n("OK: " + ($actual -join ', ')) | Set-Content -LiteralPath {PsQuote(LogPathToken)} -Encoding UTF8";
+        return $"$ErrorActionPreference='Stop'\ntrap {{ $_ | Out-String | Set-Content -LiteralPath {PsQuote(LogPathToken)} -Encoding UTF8; exit 1 }}\n$expected = @({list})\nSet-DnsClientServerAddress -InterfaceAlias {PsQuote(interfaceName)} -ServerAddresses $expected\n$actual = @(Get-DnsClientServerAddress -InterfaceAlias {PsQuote(interfaceName)} -AddressFamily {family} | Select-Object -ExpandProperty ServerAddresses)\nif (@(Compare-Object -ReferenceObject $expected -DifferenceObject $actual).Count -gt 0) {{ throw 'Windows DNS verification failed.' }}\n('OK: ' + ($actual -join ', ')) | Set-Content -LiteralPath {PsQuote(LogPathToken)} -Encoding UTF8";
     }
 
     private static DnsApplyResult RunElevatedAsync(string script)
     {
-        string operationId = Guid.NewGuid().ToString("N");
-        string scriptPath = Path.Combine(Path.GetTempPath(), "mixo6-dns-" + operationId + ".ps1");
-        string logPath = Path.Combine(Path.GetTempPath(), "mixo6-dns-" + operationId + ".result.txt");
-        script = script.Replace(PsQuote(LogPathToken), PsQuote(logPath), StringComparison.Ordinal);
+        string? scriptPath = null;
+        string? logPath = null;
         try
         {
+            string operationId = Guid.NewGuid().ToString("N");
+            string tempDirectory = Path.GetTempPath();
+            scriptPath = Path.Combine(tempDirectory, "mixo6-dns-" + operationId + ".ps1");
+            logPath = Path.Combine(tempDirectory, "mixo6-dns-" + operationId + ".result.txt");
+            script = script.Replace(PsQuote(LogPathToken), PsQuote(logPath), StringComparison.Ordinal);
+
             if (File.Exists(logPath)) File.Delete(logPath);
             File.WriteAllText(scriptPath, script, new UTF8Encoding(true));
-            var psi = new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"") { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
+
+            var psi = new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"")
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
             using var proc = Process.Start(psi);
             if (proc is null) return new DnsApplyResult(false, "اجرای ابزار مدیریتی شروع نشد.");
-            proc.WaitForExit();
+
+            // Avoid leaving the caller waiting forever if PowerShell hangs.
+            if (!proc.WaitForExit(60_000))
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { }
+                return new DnsApplyResult(false, "اجرای دستور DNS بیش از ۶۰ ثانیه طول کشید و متوقف شد.");
+            }
+
             var output = File.Exists(logPath) ? File.ReadAllText(logPath).Trim().Trim('\uFEFF') : "";
-            if (proc.ExitCode == 0 && output.StartsWith("OK", StringComparison.OrdinalIgnoreCase)) return new DnsApplyResult(true, "عملیات با موفقیت روی ویندوز اجرا شد.");
-            return new DnsApplyResult(false, string.IsNullOrWhiteSpace(output) ? "عملیات ناموفق بود. کارت شبکه و مجوز Administrator را بررسی کن." : output);
+            if (proc.ExitCode == 0 && output.StartsWith("OK", StringComparison.OrdinalIgnoreCase))
+                return new DnsApplyResult(true, output.Length > 3 ? "عملیات انجام شد: " + output[3..].Trim() : "عملیات با موفقیت روی ویندوز اجرا شد.");
+
+            return new DnsApplyResult(false, string.IsNullOrWhiteSpace(output)
+                ? "عملیات ناموفق بود. کارت شبکه، PowerShell و مجوز Administrator را بررسی کن."
+                : output);
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
             return new DnsApplyResult(false, "درخواست دسترسی Administrator لغو شد؛ هیچ تغییری اعمال نشد.");
         }
-        catch (Exception ex) { return new DnsApplyResult(false, "خطا در اجرای تنظیمات شبکه: " + ex.Message); }
-        finally { try { File.Delete(scriptPath); } catch { } try { File.Delete(logPath); } catch { } }
+        catch (Exception ex)
+        {
+            return new DnsApplyResult(false, "خطا در اجرای تنظیمات شبکه: " + ex.Message);
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(scriptPath)) { try { File.Delete(scriptPath); } catch { } }
+            if (!string.IsNullOrWhiteSpace(logPath)) { try { File.Delete(logPath); } catch { } }
+        }
     }
 
     private static string PsQuote(string value) => "'" + value.Replace("'", "''") + "'";
