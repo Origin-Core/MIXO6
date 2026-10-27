@@ -1,0 +1,14 @@
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+# Local secrets
+# build artifacts
+artifacts/
+
+# Supabase local/deployment secrets
+supabase/.env
+supabase/.env.*
+!supabase/.env.example
