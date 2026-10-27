@@ -326,7 +326,9 @@ public partial class MainWindow : Window
     private static void SetAutoStart(bool enabled)
     {
         const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        using var key = Registry.CurrentUser.OpenSubKey(runKey, writable: true) ?? Registry.CurrentUser.CreateSubKey(runKey, writable: true);
+        using var key = Registry.CurrentUser.OpenSubKey(runKey, writable: true)
+            ?? Registry.CurrentUser.CreateSubKey(runKey, writable: true)
+            ?? throw new InvalidOperationException("کلید رجیستری شروع خودکار قابل ایجاد نیست.");
         if (enabled)
         {
             var exe = Environment.ProcessPath;
@@ -536,7 +538,8 @@ public partial class MainWindow : Window
             JoinedLobbyAddressText.Text = result.ServerAddress;
             JoinedLobbyResultBorder.Visibility = Visibility.Visible;
             LobbyStatusText.Text = $"به لابی {result.Game} از {result.CreatorUsername} پیوستی. آدرس سرور در کارت بالا نمایش داده شد.";
-            Clipboard.SetText(result.ServerAddress);
+            try { Clipboard.SetText(result.ServerAddress); }
+            catch { LobbyStatusText.Text += " (کپی خودکار انجام نشد؛ آدرس را دستی کپی کن.)"; }
             await RefreshLobbiesCoreAsync(showStatus: false);
         }
         catch (Exception ex) { LobbyStatusText.Text = ex.Message; }
