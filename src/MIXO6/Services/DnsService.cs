@@ -66,7 +66,7 @@ public static class DnsService
             throw new ArgumentException("DNS اصلی و جایگزین باید هر دو IPv4 یا هر دو IPv6 باشند.");
         var family = parsed[0].AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? "IPv4" : "IPv6";
         var list = string.Join(",", parsed.Select(x => PsQuote(x.ToString())));
-        return $"$ErrorActionPreference='Stop'\ntrap {{ $_ | Out-String | Set-Content -LiteralPath {PsQuote(LogPathToken)} -Encoding UTF8; exit 1 }}\n$expected = @({list})\nSet-DnsClientServerAddress -InterfaceAlias {PsQuote(interfaceName)} -ServerAddresses $expected\n$actual = @(Get-DnsClientServerAddress -InterfaceAlias {PsQuote(interfaceName)} -AddressFamily {family} | Select-Object -ExpandProperty ServerAddresses)\nif (@(Compare-Object -ReferenceObject $expected -DifferenceObject $actual).Count -gt 0) {{ throw 'Windows DNS verification failed.' }}\n("OK: " + ($actual -join ', ')) | Set-Content -LiteralPath {PsQuote(LogPathToken)} -Encoding UTF8";
+        return $"$ErrorActionPreference='Stop'\ntrap {{ $_ | Out-String | Set-Content -LiteralPath {PsQuote(LogPathToken)} -Encoding UTF8; exit 1 }}\n$expected = @({list})\nSet-DnsClientServerAddress -InterfaceAlias {PsQuote(interfaceName)} -ServerAddresses $expected\n$actual = @(Get-DnsClientServerAddress -InterfaceAlias {PsQuote(interfaceName)} -AddressFamily {family} | Select-Object -ExpandProperty ServerAddresses)\nif (@(Compare-Object -ReferenceObject $expected -DifferenceObject $actual).Count -gt 0) {{ throw 'Windows DNS verification failed.' }}\n('OK: ' + ($actual -join ', ')) | Set-Content -LiteralPath {PsQuote(LogPathToken)} -Encoding UTF8";
     }
 
     private static DnsApplyResult RunElevatedAsync(string script)
