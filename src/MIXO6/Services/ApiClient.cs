@@ -1,10 +1,10 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MIXO6.Models;
-using System.Net.Http;
 
 namespace MIXO6.Services;
 
@@ -115,6 +115,8 @@ public sealed class ApiClient : IDisposable
         if (raw.Contains("LOBBY_CLOSED", StringComparison.OrdinalIgnoreCase)) return "این لابی بسته شده است.";
         if (raw.Contains("INVALID_GAME", StringComparison.OrdinalIgnoreCase)) return "نام بازی را وارد کن (حداکثر ۶۰ کاراکتر).";
         if (raw.Contains("INVALID_SERVER_ADDRESS", StringComparison.OrdinalIgnoreCase)) return "آدرس یا لینک سرور بازی را درست وارد کن.";
+        if (raw.Contains("INVALID_SERVER_LABEL", StringComparison.OrdinalIgnoreCase)) return "عنوان سرور باید بین ۱ تا ۸۰ کاراکتر باشد.";
+        if (raw.Contains("DESCRIPTION_TOO_LONG", StringComparison.OrdinalIgnoreCase)) return "توضیحات لابی حداکثر ۵۰۰ کاراکتر است.";
         if (lower.Contains("invalid login credentials")) return "ایمیل یا رمز عبور اشتباه است.";
         if (lower.Contains("email not confirmed")) return "ابتدا ایمیل خودت را تأیید کن.";
         if (lower.Contains("user already registered")) return "این ایمیل قبلاً ثبت‌نام کرده است.";
@@ -345,14 +347,40 @@ public sealed class ApiClient : IDisposable
 
     public async Task<LobbyDto> CreateLobbyAsync(CreateLobbyRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        var game = (request.Game ?? "").Trim();
+        var serverAddress = (request.ServerAddress ?? "").Trim();
+        var serverLabel = string.IsNullOrWhiteSpace(request.ServerLabel) ? "Custom" : request.ServerLabel.Trim();
+        var description = (request.Description ?? "").Trim();
+
+        if (game.Length is < 1 or > 60) throw new InvalidOperationException("نام بازی باید بین ۱ تا ۶۰ کاراکتر باشد.");
+        if (serverAddress.Length is < 1 or > 300) throw new InvalidOperationException("آدرس سرور باید بین ۱ تا ۳۰۰ کاراکتر باشد.");
+        if (serverLabel.Length is < 1 or > 80) throw new InvalidOperationException("عنوان سرور باید بین ۱ تا ۸۰ کاراکتر باشد.");
+        if (description.Length > 500) throw new InvalidOperationException("توضیحات لابی حداکثر ۵۰۰ کاراکتر است.");
+
         using var doc = await RequestAuthenticatedAsync(HttpMethod.Post, "rest/v1/rpc/mixo6_create_lobby", new
         {
-            p_game = request.Game.Trim(),
-            p_server_address = request.ServerAddress.Trim(),
-            p_server_label = string.IsNullOrWhiteSpace(request.ServerLabel) ? "Custom" : request.ServerLabel.Trim(),
-            p_description = (request.Description ?? "").Trim()
+            p_game = game,
+            p_server_address = serverAddress,
+            p_server_label = serverLabel,
+            p_description = description
         }).ConfigureAwait(false);
-        return new LobbyDto { Game = request.Game.Trim(), ServerLabel = request.ServerLabel, Description = request.Description, Status = "open", CreatorUsername = Session?.Username ?? "", MemberCount = 1, CreatedAt = DateTimeOffset.UtcNow };
+
+        long lobbyId = doc.RootElement.ValueKind == JsonValueKind.Number && doc.RootElement.TryGetInt64(out var createdId)
+            ? createdId
+            : 0;
+        return new LobbyDto
+        {
+            Id = lobbyId,
+            Game = game,
+            ServerLabel = serverLabel,
+            Description = description,
+            Status = "open",
+            CreatorUsername = Session?.Username ?? "",
+            CreatorAvatar = LocalSettings.Current.Avatar,
+            MemberCount = 1,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
     }
 
     public async Task<JoinLobbyResult> JoinLobbyAsync(long id)
