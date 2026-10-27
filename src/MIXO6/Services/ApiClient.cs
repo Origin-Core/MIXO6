@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MIXO6.Models;
+using System.Net.Http;
 
 namespace MIXO6.Services;
 
