@@ -1,3 +1,4 @@
+using System.IO;
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Windows;
@@ -194,7 +195,7 @@ public partial class MainWindow : Window
     private void RestartAsAdmin_Click(object sender, RoutedEventArgs e)
     {
         var executable = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
+        if (executable is null || string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
         {
             SensorStatusText.Text = "مسیر اجرای برنامه مشخص نیست؛ اجرای مجدد با مجوز مدیر ممکن نشد.";
             return;
