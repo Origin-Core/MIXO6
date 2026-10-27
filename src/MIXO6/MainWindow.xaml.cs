@@ -16,6 +16,10 @@ public partial class MainWindow : Window
     private readonly HardwareMonitorService _hardware = new();
     private readonly DispatcherTimer _sensorTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
     private readonly DispatcherTimer _presenceTimer = new() { Interval = TimeSpan.FromSeconds(90) };
+    private readonly FpsMonitorService _fps = new();
+    private readonly DispatcherTimer _fpsTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private bool _connectionChecked;
+    private bool _connectionHealthy;
     private ApiClient _api = null!;
     private FloatingWidget? _widget;
     private int _sensorBusy;
@@ -29,7 +33,7 @@ public partial class MainWindow : Window
         ("حساب کاربری", "حساب MIXO6، پروفایل و ورود ماندگار"),
         ("Origin Hub", "میانبر سایت‌های اختصاصی"),
         ("فروشگاه", "فروشگاه MIXO6"),
-        ("تنظیمات", "اتصال سرور و شخصی‌سازی رفتار برنامه")
+        ("تنظیمات", "شخصی‌سازی رفتار و بررسی سرویس‌های آنلاین")
     };
 
     public MainWindow()
@@ -37,8 +41,6 @@ public partial class MainWindow : Window
         LocalSettings.Load();
         InitializeComponent();
         _api = new ApiClient(LocalSettings.Current.ApiBaseUrl, LocalSettings.Current.SupabasePublishableKey);
-        ApiUrlBox.Text = LocalSettings.Current.ApiBaseUrl;
-        SupabasePublishableKeyBox.Text = LocalSettings.Current.SupabasePublishableKey;
         ProfileMainGameBox.Text = LocalSettings.Current.MainGame;
         ProfileAvatarCombo.SelectedIndex = AvatarIndex(LocalSettings.Current.Avatar);
         ShowWidgetCheck.IsChecked = LocalSettings.Current.ShowWidget;
@@ -46,6 +48,7 @@ public partial class MainWindow : Window
         SidebarUsernameText.Text = LocalSettings.Current.DisplayName;
         NetworkInterfaceCombo.SelectionChanged += (_, _) => RefreshDnsStatus();
         _sensorTimer.Tick += async (_, _) => await RefreshTemperaturesAsync();
+        _fpsTimer.Tick += (_, _) => RefreshFpsReading();
         _presenceTimer.Tick += async (_, _) =>
         {
             if (_api.IsConfigured && _api.IsSignedIn)
@@ -62,6 +65,7 @@ public partial class MainWindow : Window
     {
         PopulateNetworkInterfaces();
         RefreshDnsStatus();
+        RefreshFpsTargets();
         if (LocalSettings.Current.ShowWidget) EnsureWidgetVisible();
         await RefreshTemperaturesAsync();
         if (_api.IsConfigured && _api.Session is not null)
@@ -73,14 +77,20 @@ public partial class MainWindow : Window
                 catch { UpdateAuthState("نشست ذخیره شده است، اما سرور پاسخ نداد.", false); }
             }
         }
-        RefreshConnectionBadge();
-        if (_api.IsConfigured) await RefreshLobbiesCoreAsync(showStatus: false);
+        if (_api.IsConfigured)
+        {
+            await TestApiConnectionAsync();
+            await RefreshLobbiesCoreAsync(showStatus: false);
+        }
+        else RefreshConnectionBadge();
     }
 
     private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _sensorTimer.Stop();
         _presenceTimer.Stop();
+        _fpsTimer.Stop();
+        _fps.Dispose();
         _hardware.Dispose();
         _api.Dispose();
         try { _widget?.Close(); } catch { }
@@ -126,11 +136,21 @@ public partial class MainWindow : Window
         if (index == 1) RefreshDnsStatus();
         if (index == 2 && _api.IsConfigured) _ = RefreshLobbiesCoreAsync(showStatus: false);
         if (index == 3) ReflectAccountState();
-        if (index == 6) { ApiUrlBox.Text = LocalSettings.Current.ApiBaseUrl; SupabasePublishableKeyBox.Text = LocalSettings.Current.SupabasePublishableKey; RefreshConnectionBadge(); }
+        if (index == 6) RefreshConnectionBadge();
         var panel = panels[index];
         panel.Opacity = 0;
-        var animation = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(230));
-        panel.BeginAnimation(OpacityProperty, animation);
+        var motion = new TranslateTransform(0, 13);
+        panel.RenderTransform = motion;
+        var fade = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(280))
+        {
+            EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+        };
+        var slide = new System.Windows.Media.Animation.DoubleAnimation(13, 0, TimeSpan.FromMilliseconds(280))
+        {
+            EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+        };
+        panel.BeginAnimation(UIElement.OpacityProperty, fade);
+        motion.BeginAnimation(TranslateTransform.YProperty, slide);
     }
 
     private void NavDashboard_Click(object sender, RoutedEventArgs e) => SelectPage(0);
@@ -152,6 +172,8 @@ public partial class MainWindow : Window
             var snapshot = await Task.Run(() => _hardware.Read());
             CpuTempText.Text = snapshot.CpuCelsius is double c ? $"{c:0}°C" : "--°C";
             GpuTempText.Text = snapshot.GpuCelsius is double g ? $"{g:0}°C" : "--°C";
+            TopCpuTempText.Text = snapshot.CpuCelsius is double topCpu ? $"{topCpu:0}°C" : "--°C";
+            TopGpuTempText.Text = snapshot.GpuCelsius is double topGpu ? $"{topGpu:0}°C" : "--°C";
             CpuTempBar.Value = snapshot.CpuCelsius is double cv ? Math.Clamp(cv, 0, 110) : 0;
             GpuTempBar.Value = snapshot.GpuCelsius is double gv ? Math.Clamp(gv, 0, 110) : 0;
             CpuSensorNameText.Text = snapshot.CpuCelsius is null ? "سنسور CPU در دسترس نیست" : Shorten(snapshot.CpuName, 54);
@@ -159,10 +181,35 @@ public partial class MainWindow : Window
             CpuTempCaption.Text = TempCaption(snapshot.CpuCelsius);
             GpuTempCaption.Text = TempCaption(snapshot.GpuCelsius);
             SensorStatusText.Text = snapshot.Status;
+            ElevateSensorButton.Visibility = snapshot.CpuCelsius is null || snapshot.GpuCelsius is null ? Visibility.Visible : Visibility.Collapsed;
             _widget?.UpdateTemps(snapshot.CpuCelsius, snapshot.GpuCelsius);
+            _widget?.UpdateFps(_fps.ReadFps());
         }
         catch (Exception ex) { SensorStatusText.Text = "خواندن سنسورها ناموفق بود: " + ex.Message; }
         finally { Volatile.Write(ref _sensorBusy, 0); }
+    }
+
+    private async void RefreshSensors_Click(object sender, RoutedEventArgs e) => await RefreshTemperaturesAsync();
+
+    private void RestartAsAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
+        {
+            SensorStatusText.Text = "مسیر اجرای برنامه مشخص نیست؛ اجرای مجدد با مجوز مدیر ممکن نشد.";
+            return;
+        }
+        if (MessageBox.Show("برخی سنسورهای سخت‌افزاری در ویندوز به مجوز مدیر نیاز دارند. با ادامه، MIXO6 دوباره اجرا می‌شود و ویندوز پنجره‌ی UAC را نشان می‌دهد. فقط اگر خودت تأیید کنی اجرا خواهد شد.", "دسترسی سنسورهای سخت‌افزار", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas" });
+            Application.Current.Shutdown();
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            SensorStatusText.Text = "درخواست UAC لغو شد؛ برنامه با سطح دسترسی فعلی ادامه می‌دهد.";
+        }
+        catch (Exception ex) { SensorStatusText.Text = "اجرای مجدد ناموفق بود: " + ex.Message; }
     }
 
     private static string TempCaption(double? value) => value is null ? "بدون داده‌ی سنسور" : value >= 90 ? "دمای بالا؛ بررسی خنک‌کننده" : value >= 80 ? "گرم" : value >= 60 ? "در حال بارگذاری" : "محدوده‌ی معمول";
@@ -274,39 +321,129 @@ public partial class MainWindow : Window
         _widget.Topmost = true;
     }
 
-    private void RefreshConnectionBadge()
+    private void RefreshFpsTargets_Click(object sender, RoutedEventArgs e) => RefreshFpsTargets();
+
+    private void RefreshFpsTargets()
     {
-        var configured = _api?.IsConfigured == true;
-        BackendStatusText.Text = configured ? "Supabase تنظیم شده" : "Supabase تنظیم نشده";
-        ConnectionDot.Fill = BrushFrom(configured ? "#52E3B6" : "#E3B45E");
-        SettingsApiStatusText.Text = configured ? "Project URL و کلید عمومی تنظیم شده‌اند؛ اتصال واقعی با درخواست HTTPS بررسی می‌شود." : "Project URL و Publishable/anon key سوپربیس را وارد کن.";
+        var previous = (FpsTargetCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+        var targets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var process in Process.GetProcesses())
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(process.MainWindowTitle)) continue;
+                var name = process.ProcessName + ".exe";
+                if (!targets.ContainsKey(name)) targets[name] = process.MainWindowTitle;
+            }
+            catch { /* Some protected/system processes do not expose window details. */ }
+            finally { process.Dispose(); }
+        }
+        FpsTargetCombo.Items.Clear();
+        foreach (var item in targets.OrderBy(x => x.Value, StringComparer.CurrentCultureIgnoreCase))
+            FpsTargetCombo.Items.Add(new ComboBoxItem { Content = item.Value + "  ·  " + item.Key, Tag = item.Key });
+        var preferred = FpsTargetCombo.Items.OfType<ComboBoxItem>().FirstOrDefault(x => string.Equals(x.Tag?.ToString(), previous, StringComparison.OrdinalIgnoreCase));
+        FpsTargetCombo.SelectedItem = preferred ?? FpsTargetCombo.Items.OfType<ComboBoxItem>().FirstOrDefault();
+        if (FpsTargetCombo.Items.Count == 0)
+            FpsStatusText.Text = "بازیِ دارای پنجره پیدا نشد؛ بازی را اجرا کن و دوباره فهرست را بازخوانی کن.";
+        else
+            FpsStatusText.Text = $"{FpsTargetCombo.Items.Count} برنامه‌ی دارای پنجره پیدا شد؛ بازی موردنظر را انتخاب کن.";
     }
 
-    private void SaveApiSettings_Click(object sender, RoutedEventArgs e)
+    private void StartFpsMonitor_Click(object sender, RoutedEventArgs e)
     {
+        if (FpsTargetCombo.SelectedItem is not ComboBoxItem selected || selected.Tag is not string processName)
+        {
+            FpsStatusText.Text = "ابتدا بازی را باز کن و از فهرست انتخابش کن.";
+            return;
+        }
+        var elevated = FpsRunElevatedCheck.IsChecked == true;
+        if (elevated && MessageBox.Show(
+                "برای اندازه‌گیری FPS از PresentMon استفاده می‌شود. با تأیید ادامه، پنجره‌ی رسمی UAC ویندوز برای ابزار اندازه‌گیری باز می‌شود. این دسترسی فقط با انتخاب خودت درخواست خواهد شد.",
+                "اجازه‌ی اندازه‌گیری فریم", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes)
+        {
+            FpsStatusText.Text = "درخواست دسترسی لغو شد؛ پایش شروع نشد.";
+            return;
+        }
         try
         {
-            _api.SetBaseUrl(ApiUrlBox.Text);
-            _api.SetPublishableKey(SupabasePublishableKeyBox.Text);
-            LocalSettings.Current.ApiBaseUrl = _api.BaseUrl;
-            LocalSettings.Current.SupabasePublishableKey = _api.PublishableKey;
-            LocalSettings.SaveSettings();
-            RefreshConnectionBadge();
-            SettingsApiStatusText.Text = _api.IsConfigured ? "تنظیمات ذخیره شد. در حال بررسی دسترسی Supabase…" : "اطلاعات اتصال پاک یا ناقص است؛ قابلیت‌های آنلاین خاموش هستند.";
-            if (_api.IsConfigured) _ = TestApiConnectionAsync();
+            _fps.Start(processName, elevated);
+            _fpsTimer.Start();
+            FpsStatusText.Text = $"در حال دریافت فریم واقعی از {processName}؛ ممکن است چند ثانیه طول بکشد.";
+            RefreshFpsReading();
         }
-        catch (Exception ex) { SettingsApiStatusText.Text = ex.Message; }
+        catch (Exception ex)
+        {
+            FpsStatusText.Text = ex.Message;
+            FpsText.Text = "--";
+            TopFpsText.Text = "--";
+            _widget?.UpdateFps(null);
+        }
     }
+
+    private void StopFpsMonitor_Click(object sender, RoutedEventArgs e)
+    {
+        _fpsTimer.Stop();
+        _fps.Stop();
+        FpsText.Text = "--";
+        TopFpsText.Text = "--";
+        _widget?.UpdateFps(null);
+        FpsStatusText.Text = string.IsNullOrWhiteSpace(_fps.LastError) ? "پایش FPS متوقف شد." : _fps.LastError;
+    }
+
+    private void RefreshFpsReading()
+    {
+        var fps = _fps.ReadFps();
+        var text = fps is double value ? value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) : "--";
+        FpsText.Text = text;
+        TopFpsText.Text = text;
+        _widget?.UpdateFps(fps);
+        if (!_fps.IsRunning)
+        {
+            _fpsTimer.Stop();
+            if (!string.IsNullOrWhiteSpace(_fps.LastError)) FpsStatusText.Text = _fps.LastError;
+            else if (string.IsNullOrWhiteSpace(_fps.TargetProcessName)) FpsStatusText.Text = "پایش FPS شروع نشده است.";
+            else FpsStatusText.Text = "ضبط فریم متوقف شده است؛ برای شروع دوباره، بازی را انتخاب کن.";
+        }
+        else if (fps is double actual)
+            FpsStatusText.Text = $"{_fps.TargetProcessName}  ·  نرخ میانگین فریم‌های اخیر: {actual:0.0} FPS";
+        else
+            FpsStatusText.Text = "در انتظار نمونه‌ی واقعی فریم… بازی باید باز باشد؛ اگر داده نیامد، گزینه‌ی UAC را فعال و پایش را دوباره شروع کن.";
+    }
+
+    private void RefreshConnectionBadge()
+    {
+        if (!_connectionChecked)
+        {
+            BackendStatusText.Text = "بررسی سرویس";
+            ConnectionDot.Fill = BrushFrom("#E3B45E");
+            if (SettingsApiStatusText is not null) SettingsApiStatusText.Text = _api.IsConfigured
+                ? "برای بررسی اتصال واقعی، روی «بررسی اتصال» بزن. هیچ کلید یا نشانی در رابط نمایش داده نمی‌شود."
+                : "تنظیمات داخلی سرویس آنلاین در دسترس نیست؛ نسخه‌ی نصب‌شده را از انتشار رسمی دریافت کن.";
+            return;
+        }
+        BackendStatusText.Text = _connectionHealthy ? "آنلاین" : "آفلاین";
+        ConnectionDot.Fill = BrushFrom(_connectionHealthy ? "#52E3B6" : "#FF9B9B");
+    }
+
+    private async void CheckServices_Click(object sender, RoutedEventArgs e) => await TestApiConnectionAsync();
 
     private async Task TestApiConnectionAsync()
     {
+        SettingsApiStatusText.Text = "در حال بررسی اتصال HTTPS و دسترسی سرویس‌های آنلاین…";
         try
         {
             var lobbies = await _api.GetLobbiesAsync();
-            SettingsApiStatusText.Text = $"اتصال موفق است. Supabase پاسخ داد؛ {lobbies.Count} لابی باز موجود است.";
-            ConnectionDot.Fill = BrushFrom("#52E3B6");
+            _connectionChecked = true;
+            _connectionHealthy = true;
+            SettingsApiStatusText.Text = $"اتصال برقرار است؛ {lobbies.Count} لابی عمومی در دسترس است. قابلیت‌های حساب و لابی اکنون می‌توانند با سرویس ارتباط بگیرند.";
         }
-        catch (Exception ex) { SettingsApiStatusText.Text = "API قابل‌دسترسی نیست: " + ex.Message; ConnectionDot.Fill = BrushFrom("#FF9B9B"); }
+        catch (Exception ex)
+        {
+            _connectionChecked = true;
+            _connectionHealthy = false;
+            SettingsApiStatusText.Text = "اتصال به سرویس آنلاین برقرار نشد: " + ex.Message;
+        }
+        RefreshConnectionBadge();
     }
 
     private void SaveAppPreferences_Click(object sender, RoutedEventArgs e)
@@ -318,15 +455,17 @@ public partial class MainWindow : Window
             SetAutoStart(LocalSettings.Current.StartWithWindows);
             if (LocalSettings.Current.ShowWidget) EnsureWidgetVisible(); else _widget?.Hide();
             LocalSettings.SaveSettings();
-            SettingsApiStatusText.Text = "تنظیمات محلی ذخیره شدند.";
+            SettingsPreferencesStatusText.Text = "تنظیمات محلی ذخیره شدند.";
         }
-        catch (Exception ex) { SettingsApiStatusText.Text = "ذخیره‌ی تنظیمات شروع خودکار ناموفق بود: " + ex.Message; }
+        catch (Exception ex) { SettingsPreferencesStatusText.Text = "ذخیره‌ی تنظیمات شروع خودکار ناموفق بود: " + ex.Message; }
     }
 
     private static void SetAutoStart(bool enabled)
     {
         const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        using var key = Registry.CurrentUser.OpenSubKey(runKey, writable: true) ?? Registry.CurrentUser.CreateSubKey(runKey, writable: true);
+        using var key = Registry.CurrentUser.OpenSubKey(runKey, writable: true)
+            ?? Registry.CurrentUser.CreateSubKey(runKey, writable: true)
+            ?? throw new InvalidOperationException("کلید رجیستری شروع خودکار قابل ایجاد نیست.");
         if (enabled)
         {
             var exe = Environment.ProcessPath;
@@ -350,9 +489,9 @@ public partial class MainWindow : Window
             if (RegisterUsernameBox.Text.Trim().Length < 3) throw new InvalidOperationException("Username باید دست‌کم ۳ کاراکتر داشته باشد.");
             VerifyEmailBox.Text = RegisterEmailBox.Text.Trim();
             await _api.RegisterAsync(RegisterUsernameBox.Text.Trim(), RegisterEmailBox.Text.Trim(), RegisterPasswordBox.Password);
-            AuthStateText.Text = "درخواست ثبت‌نام ارسال شد؛ اگر ایمیل جدید باشد، کد تأیید دریافت می‌کنی.";
-            AuthStateText.Foreground = BrushFrom("#77E4BF");
-            MessageBox.Show("اگر این ایمیل حساب جدیدی باشد، پیام تأیید ارسال می‌شود. Inbox و Spam را بررسی کن و کد را در بخش تأیید وارد کن. اگر ایمیلی نرسید، تنظیم SMTP پروژه را بررسی کن.", "MIXO6 · ثبت‌نام", MessageBoxButton.OK, MessageBoxImage.Information);
+            VerifyEmailBox.Text = RegisterEmailBox.Text.Trim();
+            AuthTabs.SelectedIndex = 1;
+            UpdateAuthState("درخواست ثبت‌نام پذیرفته شد. Inbox و Spam را بررسی کن؛ ارسال واقعی ایمیل به تنظیمات سرویس ایمیل وابسته است.", true);
         }
         catch (Exception ex) { UpdateAuthState(ex.Message, false); }
     }
@@ -369,7 +508,7 @@ public partial class MainWindow : Window
 
     private async void ResendVerification_Click(object sender, RoutedEventArgs e)
     {
-        try { await _api.ResendVerificationAsync(VerifyEmailBox.Text.Trim()); UpdateAuthState("اگر این ایمیل در انتظار تأیید باشد، کد جدید ارسال شده است.", false); }
+        try { await _api.ResendVerificationAsync(VerifyEmailBox.Text.Trim()); UpdateAuthState("درخواست ارسال مجدد پذیرفته شد؛ Inbox و Spam را بررسی کن. این پیام به‌تنهایی تضمین تحویل ایمیل نیست.", true); }
         catch (Exception ex) { UpdateAuthState(ex.Message, false); }
     }
 
@@ -403,14 +542,23 @@ public partial class MainWindow : Window
         SidebarUsernameText.Text = user.Username;
         ProfileMainGameBox.Text = user.MainGame;
         ProfileAvatarCombo.SelectedIndex = AvatarIndex(user.Avatar);
+        AuthTabs.SelectedIndex = 3;
         UpdateAuthState("وارد شده‌ای · " + user.Username, true);
     }
 
     private void ReflectAccountState()
     {
         SidebarUsernameText.Text = LocalSettings.Current.DisplayName;
-        if (_api.IsSignedIn) UpdateAuthState("نشست ذخیره شده · " + _api.Session!.Username, true);
-        else UpdateAuthState("وارد نشده‌ای", false);
+        if (_api.IsSignedIn)
+        {
+            AuthTabs.SelectedIndex = 3;
+            UpdateAuthState("نشست ذخیره شده · " + _api.Session!.Username, true);
+        }
+        else
+        {
+            if (AuthTabs.SelectedIndex == 3) AuthTabs.SelectedIndex = 0;
+            UpdateAuthState("وارد نشده‌ای", false);
+        }
     }
 
     private void UpdateAuthState(string message, bool success)
@@ -464,13 +612,13 @@ public partial class MainWindow : Window
         if (!_api.IsConfigured)
         {
             LobbiesList.Children.Clear();
-            LobbiesList.Children.Add(new TextBlock { Text = "Supabase هنوز تنظیم نشده است. از Settings، Project URL و کلید عمومی را وارد کن.", Foreground = BrushFrom("#A9A6BB"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(5, 5, 5, 14), FlowDirection = FlowDirection.RightToLeft });
-            if (showStatus) LobbyStatusText.Text = "اتصال Supabase تنظیم نشده است.";
+            LobbiesList.Children.Add(new TextBlock { Text = "سرویس آنلاین در دسترس نیست. اتصال شبکه و نسخه‌ی نصب‌شده را بررسی کن.", Foreground = BrushFrom("#A9A6BB"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(5, 5, 5, 14), FlowDirection = FlowDirection.RightToLeft });
+            if (showStatus) LobbyStatusText.Text = "سرویس آنلاین پیکربندی نشده است.";
             return;
         }
         try
         {
-            if (showStatus) LobbyStatusText.Text = "در حال دریافت لابی‌های باز از Supabase…";
+            if (showStatus) LobbyStatusText.Text = "در حال دریافت لابی‌های عمومی…";
             var lobbies = await _api.GetLobbiesAsync();
             LobbiesList.Children.Clear();
             if (lobbies.Count == 0)
@@ -483,7 +631,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             if (showStatus) LobbyStatusText.Text = "دریافت لابی‌ها ناموفق بود: " + ex.Message;
-            if (LobbiesList.Children.Count == 0) LobbiesList.Children.Add(new TextBlock { Text = "به Supabase وصل نشدیم. Project URL، کلید عمومی و دسترسی اینترنت را بررسی کن.", Foreground = BrushFrom("#FF9B9B"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(5, 5, 5, 14), FlowDirection = FlowDirection.RightToLeft });
+            if (LobbiesList.Children.Count == 0) LobbiesList.Children.Add(new TextBlock { Text = "به سرویس آنلاین وصل نشدیم. اتصال اینترنت یا وضعیت سرور را بررسی کن.", Foreground = BrushFrom("#FF9B9B"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(5, 5, 5, 14), FlowDirection = FlowDirection.RightToLeft });
         }
     }
 
@@ -536,7 +684,8 @@ public partial class MainWindow : Window
             JoinedLobbyAddressText.Text = result.ServerAddress;
             JoinedLobbyResultBorder.Visibility = Visibility.Visible;
             LobbyStatusText.Text = $"به لابی {result.Game} از {result.CreatorUsername} پیوستی. آدرس سرور در کارت بالا نمایش داده شد.";
-            Clipboard.SetText(result.ServerAddress);
+            try { Clipboard.SetText(result.ServerAddress); }
+            catch { LobbyStatusText.Text += " (کپی خودکار انجام نشد؛ آدرس را دستی کپی کن.)"; }
             await RefreshLobbiesCoreAsync(showStatus: false);
         }
         catch (Exception ex) { LobbyStatusText.Text = ex.Message; }

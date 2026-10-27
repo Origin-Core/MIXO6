@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -41,7 +42,7 @@ public sealed class ApiClient : IDisposable
     public void SetBaseUrl(string value)
     {
         value = (value ?? "").Trim().TrimEnd('/');
-        if (value.Length > 400) throw new ArgumentException("نشانی پروژه Supabase بیش از حد طولانی است.");
+        if (value.Length > 400) throw new ArgumentException("نشانی داخلی سرویس آنلاین بیش از حد طولانی است.");
         if (!string.IsNullOrEmpty(value))
         {
             if (!Uri.TryCreate(value, UriKind.Absolute, out var u) ||
@@ -49,9 +50,9 @@ public sealed class ApiClient : IDisposable
                   (u.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) && (u.IsLoopback || u.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)))))
                 throw new ArgumentException("نشانی پروژه باید HTTPS باشد (به‌جز localhost برای تست).");
             if (!u.AbsolutePath.Equals("/", StringComparison.Ordinal) && !string.IsNullOrEmpty(u.AbsolutePath))
-                throw new ArgumentException("فقط آدرس ریشه‌ی پروژه Supabase را وارد کن؛ /rest/v1 یا /auth/v1 اضافه نکن.");
+                throw new ArgumentException("نشانی داخلی سرویس آنلاین نامعتبر است؛ مسیر اضافه‌ای به آن متصل شده است.");
             if (!string.IsNullOrEmpty(u.Query) || !string.IsNullOrEmpty(u.Fragment))
-                throw new ArgumentException("آدرس پروژه نباید Query یا Fragment داشته باشد؛ فقط URL ریشه‌ی Supabase را وارد کن.");
+                throw new ArgumentException("نشانی داخلی سرویس آنلاین نباید Query یا Fragment داشته باشد.");
         }
         BaseUrl = value;
     }
@@ -59,7 +60,7 @@ public sealed class ApiClient : IDisposable
     public void SetPublishableKey(string value)
     {
         value = (value ?? "").Trim();
-        if (value.Length > 500) throw new ArgumentException("کلید Supabase بیش از حد طولانی است.");
+        if (value.Length > 500) throw new ArgumentException("کلید عمومی سرویس بیش از حد طولانی است.");
         if (value.StartsWith("sb_secret_", StringComparison.OrdinalIgnoreCase) || value.Contains("service_role", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("کلید Secret/service_role برای برنامه‌ی دسکتاپ ممنوع است؛ فقط Publishable یا anon key را وارد کن.");
         PublishableKey = value;
@@ -69,7 +70,7 @@ public sealed class ApiClient : IDisposable
 
     private async Task<JsonDocument> RequestAsync(HttpMethod method, string path, object? body = null, bool auth = false, string? prefer = null)
     {
-        if (!IsConfigured) throw new InvalidOperationException("Project URL و Publishable/anon key سوپربیس هنوز تنظیم نشده‌اند. از تنظیمات MIXO6 واردشان کن.");
+        if (!IsConfigured) throw new InvalidOperationException("پیکربندی داخلی سرویس آنلاین MIXO6 در دسترس نیست. نسخه‌ی نصب‌شده را از انتشار رسمی دریافت کن.");
         if (auth && !IsSignedIn) throw new InvalidOperationException("برای این کار ابتدا وارد حساب شو.");
 
         using var request = new HttpRequestMessage(method, Url(path));
@@ -84,7 +85,7 @@ public sealed class ApiClient : IDisposable
         if (!response.IsSuccessStatusCode)
             throw new SupabaseApiException((int)response.StatusCode, FriendlyError(response.StatusCode, content));
         try { return JsonDocument.Parse(string.IsNullOrWhiteSpace(content) ? "{}" : content); }
-        catch (JsonException) { throw new InvalidOperationException("پاسخ Supabase قالب JSON معتبر نداشت."); }
+        catch (JsonException) { throw new InvalidOperationException("پاسخ سرویس آنلاین قالب JSON معتبر نداشت."); }
     }
 
     private static string FriendlyError(HttpStatusCode status, string content)
@@ -114,15 +115,22 @@ public sealed class ApiClient : IDisposable
         if (raw.Contains("LOBBY_CLOSED", StringComparison.OrdinalIgnoreCase)) return "این لابی بسته شده است.";
         if (raw.Contains("INVALID_GAME", StringComparison.OrdinalIgnoreCase)) return "نام بازی را وارد کن (حداکثر ۶۰ کاراکتر).";
         if (raw.Contains("INVALID_SERVER_ADDRESS", StringComparison.OrdinalIgnoreCase)) return "آدرس یا لینک سرور بازی را درست وارد کن.";
+        if (raw.Contains("INVALID_SERVER_LABEL", StringComparison.OrdinalIgnoreCase)) return "عنوان سرور باید بین ۱ تا ۸۰ کاراکتر باشد.";
+        if (raw.Contains("DESCRIPTION_TOO_LONG", StringComparison.OrdinalIgnoreCase)) return "توضیحات لابی حداکثر ۵۰۰ کاراکتر است.";
         if (lower.Contains("invalid login credentials")) return "ایمیل یا رمز عبور اشتباه است.";
         if (lower.Contains("email not confirmed")) return "ابتدا ایمیل خودت را تأیید کن.";
-        if (lower.Contains("user already registered")) return "این ایمیل قبلاً ثبت‌نام کرده است.";
-        if (lower.Contains("username") && (lower.Contains("taken") || lower.Contains("duplicate") || lower.Contains("unique"))) return "این نام کاربری قبلاً استفاده شده است.";
-        if (lower.Contains("database error saving new user")) return "ثبت‌نام انجام نشد؛ ممکن است نام کاربری تکراری باشد. نام دیگری انتخاب کن و دوباره تلاش کن.";
-        if (lower.Contains("over_email_send_rate_limit") || lower.Contains("email rate limit")) return "محدودیت ارسال ایمیل Supabase فعال شده است؛ SMTP اختصاصی را تنظیم کن یا کمی بعد تلاش کن.";
+        if (lower.Contains("user already registered")) return "این ایمیل قبلاً ثبت‌نام کرده است؛ از بخش ورود استفاده کن.";
+        if (lower.Contains("email_address_not_authorized") || lower.Contains("email address not authorized"))
+            return "سرویس ایمیل فعلی اجازه‌ی ارسال به این آدرس را ندارد. در تنظیمات ایمیل پروژه، SMTP اختصاصی تنظیم کن یا برای آزمایش از یک آدرس مجاز پروژه استفاده کن.";
+        if (lower.Contains("error sending confirmation") || lower.Contains("sending confirmation email") || lower.Contains("gomail") || lower.Contains("smtp"))
+            return "سرویس احراز هویت نتوانست ایمیل تأیید را ارسال کند. در داشبورد سرویس، Auth Logs را در زمان همین تلاش بررسی کن؛ علت معمولاً تنظیم SMTP، محدودیت ارسال یا قالب ایمیل است. سرویس ایمیل پیش‌فرض فقط برای آزمایش است؛ برای ثبت‌نام عمومی باید SMTP اختصاصی راه‌اندازی شود.";
+        if (lower.Contains("database error saving new user"))
+            return "ساخت حساب در پایگاه‌داده با خطا مواجه شد. در Auth Logs و Postgres Logs علت دقیق را بررسی کن؛ ممکن است trigger ساخت پروفایل یا migration دیتابیس مشکل داشته باشد.";
+        if (lower.Contains("over_email_send_rate_limit") || lower.Contains("email rate limit")) return "سقف ارسال ایمیل فعال شده است؛ پس از گذشت زمان محدودیت دوباره تلاش کن یا SMTP اختصاصی تنظیم کن.";
         if ((int)status == 429) return "درخواست‌ها بیش از حد بوده‌اند؛ کمی بعد دوباره تلاش کن.";
-        if ((int)status is 401 or 403) return "نشست یا کلید نامعتبر است؛ تنظیمات اتصال Supabase و وضعیت ورود را بررسی کن.";
-        return $"Supabase پاسخ {(int)status} داد: {raw}";
+        if ((int)status is 401 or 403) return "نشست یا مجوز دسترسی معتبر نیست؛ دوباره وارد حساب شو. اگر مشکل اتصال ادامه داشت، وضعیت سرویس را بررسی کن.";
+        if ((int)status >= 500) return $"سرویس آنلاین خطای داخلی {(int)status} برگرداند. زمان دقیق خطا را در گزارش‌های سرویس بررسی کن.";
+        return $"درخواست ناموفق بود ({(int)status}): {raw}";
     }
 
     private async Task<JsonDocument> RequestAuthenticatedAsync(HttpMethod method, string path, object? body = null, string? prefer = null)
@@ -215,9 +223,9 @@ public sealed class ApiClient : IDisposable
         if (string.IsNullOrWhiteSpace(username)) username = old?.Username;
         if (string.IsNullOrWhiteSpace(username)) username = user?.Email?.Split('@').FirstOrDefault() ?? "Player";
         if (string.IsNullOrWhiteSpace(tokens.AccessToken) || string.IsNullOrWhiteSpace(tokens.RefreshToken))
-            throw new InvalidOperationException("Supabase نشست معتبر برنگرداند.");
+            throw new InvalidOperationException("سرویس ورود نشست معتبر برنگرداند.");
         if (string.IsNullOrWhiteSpace(id))
-            throw new InvalidOperationException("شناسه‌ی کاربر از Supabase دریافت نشد؛ دوباره وارد شو.");
+            throw new InvalidOperationException("شناسه‌ی کاربر از سرویس ورود دریافت نشد؛ دوباره وارد شو.");
 
         Session = new SessionData
         {
@@ -312,7 +320,7 @@ public sealed class ApiClient : IDisposable
         using var profileDoc = await RequestAuthenticatedAsync(HttpMethod.Get,
             "rest/v1/profiles?select=id,username,avatar,main_game,last_seen_at&id=eq." + Uri.EscapeDataString(Session.UserId) + "&limit=1").ConfigureAwait(false);
         var profile = profileDoc.RootElement.Deserialize<List<ProfileRow>>(_json)?.FirstOrDefault();
-        if (profile is null) throw new InvalidOperationException("پروفایل پیدا نشد؛ احتمالاً SQL راه‌اندازی Supabase هنوز اجرا نشده است.");
+        if (profile is null) throw new InvalidOperationException("پروفایل پیدا نشد؛ migration پایگاه‌داده را بررسی کن.");
         Session.Username = profile.Username;
         Session.Email = authUser?.Email ?? Session.Email;
         LocalSettings.SaveSession(Session);
@@ -344,14 +352,40 @@ public sealed class ApiClient : IDisposable
 
     public async Task<LobbyDto> CreateLobbyAsync(CreateLobbyRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        var game = (request.Game ?? "").Trim();
+        var serverAddress = (request.ServerAddress ?? "").Trim();
+        var serverLabel = string.IsNullOrWhiteSpace(request.ServerLabel) ? "Custom" : request.ServerLabel.Trim();
+        var description = (request.Description ?? "").Trim();
+
+        if (game.Length is < 1 or > 60) throw new InvalidOperationException("نام بازی باید بین ۱ تا ۶۰ کاراکتر باشد.");
+        if (serverAddress.Length is < 1 or > 300) throw new InvalidOperationException("آدرس سرور باید بین ۱ تا ۳۰۰ کاراکتر باشد.");
+        if (serverLabel.Length is < 1 or > 80) throw new InvalidOperationException("عنوان سرور باید بین ۱ تا ۸۰ کاراکتر باشد.");
+        if (description.Length > 500) throw new InvalidOperationException("توضیحات لابی حداکثر ۵۰۰ کاراکتر است.");
+
         using var doc = await RequestAuthenticatedAsync(HttpMethod.Post, "rest/v1/rpc/mixo6_create_lobby", new
         {
-            p_game = request.Game.Trim(),
-            p_server_address = request.ServerAddress.Trim(),
-            p_server_label = string.IsNullOrWhiteSpace(request.ServerLabel) ? "Custom" : request.ServerLabel.Trim(),
-            p_description = (request.Description ?? "").Trim()
+            p_game = game,
+            p_server_address = serverAddress,
+            p_server_label = serverLabel,
+            p_description = description
         }).ConfigureAwait(false);
-        return new LobbyDto { Game = request.Game.Trim(), ServerLabel = request.ServerLabel, Description = request.Description, Status = "open", CreatorUsername = Session?.Username ?? "", MemberCount = 1, CreatedAt = DateTimeOffset.UtcNow };
+
+        long lobbyId = doc.RootElement.ValueKind == JsonValueKind.Number && doc.RootElement.TryGetInt64(out var createdId)
+            ? createdId
+            : 0;
+        return new LobbyDto
+        {
+            Id = lobbyId,
+            Game = game,
+            ServerLabel = serverLabel,
+            Description = description,
+            Status = "open",
+            CreatorUsername = Session?.Username ?? "",
+            CreatorAvatar = LocalSettings.Current.Avatar,
+            MemberCount = 1,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
     }
 
     public async Task<JoinLobbyResult> JoinLobbyAsync(long id)

@@ -14,12 +14,25 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
+
+      - name: Download pinned PresentMon FPS capture tool
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $toolDir = '.\src\MIXO6\tools'
+          New-Item -ItemType Directory -Force -Path $toolDir | Out-Null
+          $toolPath = Join-Path $toolDir 'PresentMon.exe'
+          $url = 'https://github.com/GameTechDev/PresentMon/releases/download/v2.6.0/PresentMon-2.6.0-x64.exe'
+          Invoke-WebRequest -Uri $url -OutFile $toolPath
+          $file = Get-Item $toolPath
+          if ($file.Length -lt 100000) { throw 'PresentMon download is incomplete or invalid.' }
+          Write-Host ("PresentMon 2.6.0 downloaded; size={0}; SHA256={1}" -f $file.Length, (Get-FileHash $toolPath -Algorithm SHA256).Hash)
 
       - name: Restore
         run: dotnet restore .\src\MIXO6\MIXO6.csproj -r win-x64
@@ -32,7 +45,7 @@ jobs:
         run: Compress-Archive -Path .\artifacts\MIXO6-win-x64\* -DestinationPath .\artifacts\MIXO6-win-x64.zip -Force
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MIXO6-win-x64
           path: artifacts/MIXO6-win-x64.zip
@@ -41,7 +54,7 @@ jobs:
 
       - name: Publish GitHub Release for version tag
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: artifacts/MIXO6-win-x64.zip
