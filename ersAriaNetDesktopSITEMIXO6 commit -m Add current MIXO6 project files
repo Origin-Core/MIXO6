@@ -1,0 +1,41 @@
+ .github/workflows/deploy-supabase-functions.yml |  57 [32m++[m
+ .github/workflows/windows-ci.yml                |  44 [32m++[m
+ .github/workflows/windows-release.yml           |  66 [32m++[m
+ .gitignore                                      |  25 [32m+[m
+ GITHUB.fa.md                                    |  51 [32m++[m
+ LICENSE.txt                                     |  17 [32m+[m
+ MIXO6.sln                                       |  18 [32m+[m
+ README.fa.md                                    |  81 [32m+++[m
+ THIRD_PARTY_NOTICES.md                          |   9 [32m+[m
+ build-windows.ps1                               |  37 [32m+[m
+ docs/DESIGN_SYSTEM_FA.md                        |  36 [32m+[m
+ docs/RELEASE_CHECKLIST_FA.md                    |  28 [32m+[m
+ docs/STATIC_VALIDATION_FA.md                    |  42 [32m++[m
+ global.json                                     |   7 [32m+[m
+ scripts/Download-PresentMon.ps1                 |  35 [32m+[m
+ scripts/Install-PersianFonts.ps1                | 131 [32m++++[m
+ src/MIXO6/App.xaml                              | 150 [32m++++[m
+ src/MIXO6/App.xaml.cs                           |  15 [32m+[m
+ src/MIXO6/FloatingWidget.xaml                   |  22 [32m+[m
+ src/MIXO6/FloatingWidget.xaml.cs                |  32 [32m+[m
+ src/MIXO6/MIXO6.csproj                          |  44 [32m++[m
+ src/MIXO6/MainWindow.xaml                       | 378 [32m++++++++++[m
+ src/MIXO6/MainWindow.xaml.cs                    | 924 [32m++++++++++++++++++++++++[m
+ src/MIXO6/Models/ApiModels.cs                   |  53 [32m++[m
+ src/MIXO6/Services/ApiClient.cs                 | 487 [32m+++++++++++++[m
+ src/MIXO6/Services/DnsService.cs                | 100 [32m+++[m
+ src/MIXO6/Services/FontResolver.cs              |  69 [32m++[m
+ src/MIXO6/Services/FpsMonitorService.cs         | 168 [32m+++++[m
+ src/MIXO6/Services/HardwareMonitorService.cs    |  93 [32m+++[m
+ src/MIXO6/Services/LocalSettings.cs             | 104 [32m+++[m
+ src/MIXO6/app.manifest                          |   7 [32m+[m
+ src/MIXO6/assets/mixo6-logo.png                 | Bin [31m0[m -> [32m239098[m bytes
+ src/MIXO6/assets/mixo6.ico                      | Bin [31m0[m -> [32m76742[m bytes
+ src/MIXO6/tools/README.md                       |   3 [32m+[m
+ supabase/FUNCTIONS.fa.md                        |  37 [32m+[m
+ supabase/SETUP.fa.md                            |  93 [32m+++[m
+ supabase/SMTP.fa.md                             |  93 [32m+++[m
+ supabase/config.toml                            |   4 [32m+[m
+ supabase/functions/mixo6-login/index.ts         |  87 [32m+++[m
+ supabase/migrations/20261027000000_mixo6.sql    | 305 [32m++++++++[m
+ 40 files changed, 3952 insertions(+)
