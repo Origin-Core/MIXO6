@@ -24,9 +24,9 @@ public sealed class HardwareMonitorService : IDisposable
                 ReadHardware(hardware, ref cpu, ref gpu, ref cpuScore, ref gpuScore, ref cpuName, ref gpuName);
 
             var status = cpu is null && gpu is null
-                ? "سنسور دما از این سخت‌افزار قابل خواندن نیست؛ ممکن است سازنده/سخت‌افزار دسترسی را محدود کرده باشد."
-                : cpu is null ? "دمای CPU در دسترس نیست؛ مقدار جعلی نمایش داده نمی‌شود."
-                : gpu is null ? "دمای GPU در دسترس نیست؛ مقدار جعلی نمایش داده نمی‌شود."
+                ? "دادهٔ دمای واقعی پیدا نشد. دکمهٔ «خواندن سنسورها با مجوز مدیر» را بزن؛ بعضی سازنده‌ها سنسور را فقط با دسترسی مدیر یا ابزار اختصاصی در اختیار می‌گذارند."
+                : cpu is null ? "سنسور CPU خوانده نشد؛ برای امنیت هیچ دمای حدسی نمایش داده نمی‌شود."
+                : gpu is null ? "سنسور GPU خوانده نشد؛ برای امنیت هیچ دمای حدسی نمایش داده نمی‌شود."
                 : "دمای واقعی سنسورها در حال به‌روزرسانی است.";
             return new TemperatureSnapshot(cpu, gpu, cpuName, gpuName, status);
         }
