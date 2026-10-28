@@ -122,14 +122,14 @@ public sealed class ApiClient : IDisposable
         if (lower.Contains("user already registered")) return "این ایمیل قبلاً ثبت‌نام کرده است؛ از بخش ورود استفاده کن.";
         if (lower.Contains("email_address_not_authorized") || lower.Contains("email address not authorized"))
             return "سرویس ایمیل فعلی اجازه‌ی ارسال به این آدرس را ندارد. در تنظیمات ایمیل پروژه، SMTP اختصاصی تنظیم کن یا برای آزمایش از یک آدرس مجاز پروژه استفاده کن.";
-        if (lower.Contains("error sending confirmation") || lower.Contains("sending confirmation email") || lower.Contains("gomail") || lower.Contains("smtp"))
-            return "سرویس احراز هویت نتوانست ایمیل تأیید را ارسال کند. در داشبورد سرویس، Auth Logs را در زمان همین تلاش بررسی کن؛ علت معمولاً تنظیم SMTP، محدودیت ارسال یا قالب ایمیل است. سرویس ایمیل پیش‌فرض فقط برای آزمایش است؛ برای ثبت‌نام عمومی باید SMTP اختصاصی راه‌اندازی شود.";
+        if (lower.Contains("error sending confirmation") || lower.Contains("sending confirmation email") || lower.Contains("unable to send confirmation") || lower.Contains("gomail") || lower.Contains("smtp"))
+            return "Supabase نتوانست ایمیل تأیید را به SMTP تحویل دهد. تغییر Site URL به‌تنهایی این خطا را رفع نمی‌کند. در Supabase → Logs → Auth، زمان همین تلاش را باز کن و متن SMTP را بررسی کن؛ اگر Auth Logs خطای SMTP نداشتند، Postgres Logs و trigger ساخت پروفایل را بررسی کن.";
         if (lower.Contains("database error saving new user"))
             return "ساخت حساب در پایگاه‌داده با خطا مواجه شد. در Auth Logs و Postgres Logs علت دقیق را بررسی کن؛ ممکن است trigger ساخت پروفایل یا migration دیتابیس مشکل داشته باشد.";
         if (lower.Contains("over_email_send_rate_limit") || lower.Contains("email rate limit")) return "سقف ارسال ایمیل فعال شده است؛ پس از گذشت زمان محدودیت دوباره تلاش کن یا SMTP اختصاصی تنظیم کن.";
         if ((int)status == 429) return "درخواست‌ها بیش از حد بوده‌اند؛ کمی بعد دوباره تلاش کن.";
         if ((int)status is 401 or 403) return "نشست یا مجوز دسترسی معتبر نیست؛ دوباره وارد حساب شو. اگر مشکل اتصال ادامه داشت، وضعیت سرویس را بررسی کن.";
-        if ((int)status >= 500) return $"سرویس آنلاین خطای داخلی {(int)status} برگرداند. زمان دقیق خطا را در گزارش‌های سرویس بررسی کن.";
+        if ((int)status >= 500) return $"سرویس آنلاین خطای داخلی {(int)status} برگرداند. زمان دقیق خطا را در Supabase → Logs → Auth و Logs → Postgres بررسی کن؛ هنگام ثبت‌نام معمولاً SMTP، قالب تأیید یا trigger دیتابیس باید بررسی شود.";
         return $"درخواست ناموفق بود ({(int)status}): {raw}";
     }
 
