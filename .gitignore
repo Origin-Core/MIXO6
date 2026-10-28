@@ -1,0 +1,25 @@
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+# Local secrets
+# build artifacts
+artifacts/
+
+# Supabase local/deployment secrets
+supabase/.env
+supabase/.env.*
+!supabase/.env.example
+
+# Supabase CLI and local credentials
+supabase/.temp/
+supabase/.branches/
+.env
+.env.*
+!.env.example
+
+# Downloaded, version-pinned third-party runtime tool (downloaded by scripts/Download-PresentMon.ps1)
+src/MIXO6/tools/PresentMon.exe
+src/MIXO6/tools/PresentMon.exe.download
